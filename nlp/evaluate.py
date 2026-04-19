@@ -23,7 +23,7 @@ def classify_text_bert_eval(text: str, pipeline) -> str:
     result = pipeline(text, truncation=True, max_length=512)[0]
     if result["score"] < THRESHOLD:
         return "neutral"
-    return "positive" if result["label"] == "LABEL_1" else "negative"
+    return result["label"].lower()  # "positive", "neutral", "negative"
 
 
 # ── metrics ──────────────────────────────────────────────────────────────────
@@ -154,7 +154,7 @@ def main() -> None:
             from transformers import pipeline as hf_pipeline
             bert_pipe = hf_pipeline(
                 "sentiment-analysis",
-                model="shibing624/bert-base-chinese-sentiment",
+                model="lxyuan/distilbert-base-multilingual-cased-sentiments-student",
                 device=-1,
             )
             print("      Evaluating BERT classifier ...")
@@ -178,7 +178,7 @@ def main() -> None:
     print(header)
     print("-" * (37 + (13 if bert_metrics else 0)))
 
-    def row(name: str, lv: float, bv: float | None) -> str:
+    def row(name: str, lv: float, bv) -> str:
         line = f"{name:<25} {lv:>11.4f}"
         if bv is not None:
             line += f" {bv:>11.4f}"

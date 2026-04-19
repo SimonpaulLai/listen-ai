@@ -93,8 +93,8 @@ def classify_text_lexicon(text: str) -> tuple[str, int]:
 
 # ── BERT-based classifier (new algorithm) ────────────────────────────────────
 
-BERT_MODEL = "shibing624/bert-base-chinese-sentiment"
-BERT_NEUTRAL_THRESHOLD = 0.70  # confidence below this → neutral
+BERT_MODEL = "lxyuan/distilbert-base-multilingual-cased-sentiments-student"
+BERT_NEUTRAL_THRESHOLD = 0.60  # confidence below this → neutral
 
 _bert_pipeline = None
 USE_BERT = False
@@ -119,12 +119,11 @@ if SENTIMENT_MODE == "bert":
 def classify_text_bert(text: str) -> tuple[str, float]:
     assert _bert_pipeline is not None
     result = _bert_pipeline(text, truncation=True, max_length=512)[0]
-    label_raw: str = result["label"]   # "LABEL_1" or "LABEL_0"
+    label_raw: str = result["label"].lower()   # "positive", "neutral", "negative"
     confidence: float = result["score"]
     if confidence < BERT_NEUTRAL_THRESHOLD:
         return "neutral", confidence
-    sentiment = "positive" if label_raw == "LABEL_1" else "negative"
-    return sentiment, confidence
+    return label_raw, confidence
 
 
 # ── API models ────────────────────────────────────────────────────────────────
