@@ -4,3 +4,4 @@ pydantic==2.11.7
 torch
 transformers==4.31.0
 sentencepiece==0.1.97
+anthropic>=0.40.0
