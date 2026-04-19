@@ -15,9 +15,10 @@ if "token" not in st.session_state:
 
 st.title("ListenAI Dashboard")
 st.caption("Track sentiment, keywords, trends, and example posts by keyword filters.")
-st.text("Hello! 梁安哲")
+st.text("Hello! 賴楠天")
 
-dashboard_tab, add_post_tab = st.tabs(["Dashboard", "Add Post"])
+# 這裡修改了：多加一個 nlp_lab_tab
+dashboard_tab, add_post_tab, nlp_lab_tab = st.tabs(["Dashboard", "Add Post", "NLP Lab"])
 
 with st.sidebar:
     st.subheader("Authentication")
@@ -174,7 +175,7 @@ with dashboard_tab:
                     st.markdown(
                         f"**[{post.get('platform', 'unknown')}] @{post.get('author', 'user')}** "
                         f"({post.get('created_at', '')})  \n"
-                        f"Sentiment: **{post.get('sentiment', 'neutral')}**  \n"
+                        f"Sentiment: **{post.get('sentiment', 'neutral')}** \n"
                         f"{content}"
                     )
                     st.divider()
@@ -223,3 +224,43 @@ with add_post_tab:
                         st.error(f"Detail: {err_data['detail']}")
             except Exception as exc:
                 st.error(f"Gateway error: {exc}")
+
+# --- 全新外掛：NLP Lab 分頁 ---
+with nlp_lab_tab:
+    st.subheader("🧪 NLP 情感分析實驗室")
+    st.caption("直接測試單一語句的情感分析結果，用來評估 BERT 與字典法的準確度差異。")
+
+    test_text = st.text_area("輸入測試文字", value="這家書店沒有不好", height=100)
+    
+    if st.button("執行分析", type="primary", key="nlp_btn"):
+        if not st.session_state.token:
+            st.warning("請先登入。")
+        else:
+            try:
+                with st.spinner("NLP 運算中..."):
+                    # 呼叫 Gateway 上的 /api/sentiment (需要確保 Gateway 有路由到 nlp)
+                    # 如果 Gateway 沒設，也可以暫時直接打 f"http://nlp:8001/sentiment" 來硬幹測試
+                    resp = requests.post(
+                        f"{GATEWAY_URL}/api/sentiment", 
+                        json={"texts": [test_text]},
+                        headers={"Authorization": f"Bearer {st.session_state.token}"},
+                        timeout=30,
+                    )
+
+                if resp.status_code == 200:
+                    result = resp.json()
+                    classifications = result.get("classifications", [])
+                    if classifications:
+                        cls = classifications[0]
+                        res_col1, res_col2, res_col3 = st.columns(3)
+                        res_col1.metric("分析標籤", str(cls.get("label", "N/A")).upper())
+                        res_col2.metric("分數", round(float(cls.get("score", 0)), 4))
+                        res_col3.metric("使用模型", result.get("model_used", "Lexicon (預設)"))
+                        
+                    with st.expander("查看原始 JSON (Raw Data)"):
+                        st.json(result)
+                else:
+                    st.error(f"分析失敗: HTTP {resp.status_code}")
+                    st.write(resp.text)
+            except Exception as e:
+                st.error(f"連線錯誤: {e}")

@@ -315,7 +315,7 @@ func main() {
 	}
 	sqlitePath := os.Getenv("SQLITE_PATH")
 	if sqlitePath == "" {
-		sqlitePath = "./listenai.db"
+		sqlitePath = "./data/listenai.db"
 	}
 
 	db, err := sql.Open("sqlite", sqlitePath)

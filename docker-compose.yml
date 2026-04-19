@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  stat:
+    build: ./stat
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./data:/app/data
+    networks:
+      - listenai-net
+
+  nlp:
+    build: ./nlp
+    ports:
+      - "8001:8001"
+    networks:
+      - listenai-net
+
+  gateway:
+    build: ./gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - STAT_URL=http://stat:8002
+      - NLP_URL=http://nlp:8001
+    networks:
+      - listenai-net
+    depends_on:
+      - stat
+      - nlp
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - GATEWAY_URL=http://gateway:8000
+    networks:
+      - listenai-net
+    depends_on:
+      - gateway
+
+networks:
+  listenai-net:
+    driver: bridge

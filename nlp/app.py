@@ -1,179 +1,40 @@
+# nlp/app.py (更新後版本)
 import os
-import re
-from collections import Counter
-
+import torch
 from fastapi import FastAPI
 from pydantic import BaseModel
+from collections import Counter
+from transformers import pipeline
 
-app = FastAPI(title="listen-ai-nlp")
+app = FastAPI(title="listen-ai-nlp-optimized")
 
-POSITIVE_WORDS = {
-    "good",
-    "great",
-    "excellent",
-    "love",
-    "awesome",
-    "happy",
-    "amazing",
-    "nice",
-    "best",
-    "positive",
-    "fast",
-    "smooth",
-    "reliable",
-}
+# --- 舊有的字典法邏輯 (保留作為對照組) ---
+# ... (這裡放你原本的 POSITIVE_WORDS, tokenize, classify_text 等函式) ...
 
-POSITIVE_WORDS_ZH_TW = {
-    "好",
-    "很好",
-    "優秀",
-    "喜歡",
-    "讚",
-    "開心",
-    "高興",
-    "棒",
-    "最佳",
-    "正面",
-    "快速",
-    "順暢",
-    "可靠",
-    "滿意",
-    "推薦",
-}
-
-NEGATIVE_WORDS = {
-    "bad",
-    "terrible",
-    "awful",
-    "hate",
-    "worst",
-    "slow",
-    "bug",
-    "bugs",
-    "issue",
-    "issues",
-    "angry",
-    "broken",
-    "negative",
-    "expensive",
-}
-
-NEGATIVE_WORDS_ZH_TW = {
-    "差",
-    "糟糕",
-    "很糟",
-    "討厭",
-    "最差",
-    "慢",
-    "錯誤",
-    "問題",
-    "生氣",
-    "壞掉",
-    "負面",
-    "昂貴",
-    "失望",
-    "卡頓",
-}
-
-NEGATION_WORDS = {
-    "not",
-    "never",
-    "no",
-    "hardly",
-    "不",
-    "沒",
-    "無",
-    "未",
-    "別",
-    "不是",
-}
-
-POSITIVE_WORDS_ALL = POSITIVE_WORDS | POSITIVE_WORDS_ZH_TW
-NEGATIVE_WORDS_ALL = NEGATIVE_WORDS | NEGATIVE_WORDS_ZH_TW
-
-CJK_LEXICON_TERMS = sorted(
-    POSITIVE_WORDS_ZH_TW | NEGATIVE_WORDS_ZH_TW | {w for w in NEGATION_WORDS if re.search(r"[\u4e00-\u9fff]", w)},
-    key=len,
-    reverse=True,
-)
-
-
-def _tokenize_cjk_segment(segment: str) -> list[str]:
-    tokens: list[str] = []
-    idx = 0
-
-    # Use longest-match first so multi-character words (e.g. "不是", "很糟") are preserved.
-    while idx < len(segment):
-        match = ""
-        for term in CJK_LEXICON_TERMS:
-            if segment.startswith(term, idx):
-                match = term
-                break
-
-        if match:
-            tokens.append(match)
-            idx += len(match)
-        else:
-            tokens.append(segment[idx])
-            idx += 1
-
-    return tokens
-
-
-def tokenize(text: str) -> list[str]:
-    raw_tokens = re.findall(r"[a-zA-Z']+|[\u4e00-\u9fff]+", text.lower())
-    tokens: list[str] = []
-
-    for raw in raw_tokens:
-        if re.fullmatch(r"[\u4e00-\u9fff]+", raw):
-            tokens.extend(_tokenize_cjk_segment(raw))
-        else:
-            tokens.append(raw)
-
-    return tokens
-
-
-def classify_text(text: str) -> tuple[str, int]:
-    tokens = tokenize(text)
-    score = 0
-    previous_tokens = ["", ""]
-
-    for token in tokens:
-        is_negated = any(prev in NEGATION_WORDS for prev in previous_tokens)
-
-        if token in POSITIVE_WORDS_ALL:
-            score += -1 if is_negated else 1
-        elif token in NEGATIVE_WORDS_ALL:
-            score += 1 if is_negated else -1
-
-        previous_tokens = [previous_tokens[-1], token]
-
-    if score > 0:
-        return "positive", score
-    if score < 0:
-        return "negative", score
-    return "neutral", score
-
+# --- 新的深度學習邏輯 (BERT) ---
+# 使用針對中文情緒分析微調過的模型
+MODEL_NAME = "shibing624/bert-base-chinese-sentiment"
+try:
+    print(f"Loading model {MODEL_NAME}...")
+    # 使用 CPU 推理 (M2 16GB 跑這個很快)
+    nlp_model = pipeline("sentiment-analysis", model=MODEL_NAME)
+    USE_BERT = True
+except Exception as e:
+    print(f"Failed to load BERT: {e}")
+    USE_BERT = False
 
 class SentimentRequest(BaseModel):
     texts: list[str]
 
-
 class SentimentItem(BaseModel):
     text: str
     label: str
-    score: int
-
+    score: float # 深度學習改回傳信心分數
 
 class SentimentResponse(BaseModel):
     sentiment_percentage: dict[str, float]
     classifications: list[SentimentItem]
-
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "service": "nlp", "port": os.getenv("NLP_PORT", "8001")}
-
+    model_used: str
 
 @app.post("/sentiment", response_model=SentimentResponse)
 def sentiment(req: SentimentRequest) -> SentimentResponse:
@@ -181,18 +42,23 @@ def sentiment(req: SentimentRequest) -> SentimentResponse:
     counts = Counter({"positive": 0, "neutral": 0, "negative": 0})
 
     for text in req.texts:
-        label, score = classify_text(text)
+        if USE_BERT:
+            # BERT 預測
+            prediction = nlp_model(text)[0]
+            # 將模型的 LABEL_1 (正向) / LABEL_0 (負向) 轉回系統標籤
+            label = "positive" if prediction['label'] == 'LABEL_1' else "negative"
+            score = prediction['score']
+        else:
+            # 回退到字典法
+            label, raw_score = classify_text(text)
+            score = float(raw_score)
+
         counts[label] += 1
         results.append(SentimentItem(text=text, label=label, score=score))
 
     total = max(1, len(req.texts))
-    sentiment_percentage = {
-        "positive": round((counts["positive"] / total) * 100, 2),
-        "neutral": round((counts["neutral"] / total) * 100, 2),
-        "negative": round((counts["negative"] / total) * 100, 2),
-    }
-
     return SentimentResponse(
-        sentiment_percentage=sentiment_percentage,
+        sentiment_percentage={k: round((v / total) * 100, 2) for k, v in counts.items()},
         classifications=results,
+        model_used="BERT-DeepLearning" if USE_BERT else "Lexicon-Based"
     )
